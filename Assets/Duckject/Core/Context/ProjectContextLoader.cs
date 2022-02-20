@@ -10,10 +10,11 @@ namespace Duckject.Core.Context
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void Initialize()
         {
-            var instance = Instantiate(Resources.Load<ProjectContext>(PREFAB_PATH));
+            ProjectContext projectContext = Resources.Load<ProjectContext>(PREFAB_PATH);
+            var instance = Instantiate(projectContext);
             DontDestroyOnLoad(instance);
             instance.Initialize();
-            
+
             QuackUtils.CreateNonLazyInstances();
         }
     }

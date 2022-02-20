@@ -1,10 +1,8 @@
-﻿using System.Diagnostics;
-using System.Linq;
+﻿using System.Linq;
 using Duckject.Core.Extensions;
 using Duckject.Core.Utils;
 using UnityEditor;
 using UnityEngine;
-using Debug = UnityEngine.Debug;
 
 namespace Duckject.Core.Injection
 {
@@ -22,16 +20,8 @@ namespace Duckject.Core.Injection
 
         private void Awake()
         {
-            Stopwatch stopwatch = new Stopwatch();
-            
-            stopwatch.Start();
-            
             foreach (var monoBehaviour in _injectionBehaviours)
                 monoBehaviour.Quack();
-            
-            stopwatch.Stop();
-            
-            //Debug.Log(stopwatch.ElapsedMilliseconds);
         }
 
         #region Neted Types
@@ -77,6 +67,8 @@ namespace Duckject.Core.Injection
                 .Select(item => item.behaviour)
                 .ToArray();
         }
+
+        private void Reset() => UpdateInjectionBehaviours();
 
 #endif
 

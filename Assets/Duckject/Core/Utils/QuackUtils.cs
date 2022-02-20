@@ -17,7 +17,7 @@ namespace Duckject.Core.Utils
         {
             foreach (MethodInfo methodInfo in GetMethods(targetObject))
             {
-                object[] parameters = GetParameters(methodInfo, targetObject);
+                object[] parameters = GetParameters(methodInfo, targetObject.GetType(), targetObject);
 
                 methodInfo.Invoke(targetObject, parameters);
             }
@@ -28,17 +28,11 @@ namespace Duckject.Core.Utils
             IEnumerable<Binding> bindings = ContextBase.Containers.SelectMany(container => container.Bindings);
 
             IEnumerable<Binding> nonLazyBindings =
-                bindings.Where(b => b.IsNonLazy && b.InstanceType == InstanceType.Cached && b.Service == null);
+                bindings.Where(b => b.IsNonLazy && b.InstanceType == InstanceType.Cached && b.Service == null)
+                    .ToArray();
 
             foreach (Binding nonLazyBinding in nonLazyBindings)
-            {
-                if (TryToCreateMonoBehaviour(nonLazyBinding))
-                    continue;
-
-                TryToCreateNonBehaviourInstance(nonLazyBinding);
-
-                Debug.Log(nonLazyBinding.Service);
-            }
+                TryToCreateInstance(nonLazyBinding);
         }
 
         public static bool IsContainInjectionMethods(object targetObject) => GetMethods(targetObject).Any();
@@ -47,36 +41,38 @@ namespace Duckject.Core.Utils
 
         #region Private Methods
 
-        private static bool TryToCreateMonoBehaviour(Binding binding)
+        private static object TryToCreateInstance(Binding binding)
         {
             Type serviceType = binding.ServiceType;
 
             if (serviceType.IsSubclassOf(typeof(MonoBehaviour)))
             {
                 GameObject newGameObject = new GameObject(serviceType.FullName);
+                newGameObject.transform.SetParent(ContextBase.GetTransformFor(binding));
                 newGameObject.SetActive(false);
                 Component service = newGameObject.AddComponent(serviceType);
-                binding.FromInstance(service);
+                if (binding.InstanceType == InstanceType.Cached)
+                    binding.FromInstance(service);
                 Inject(service);
                 newGameObject.SetActive(true);
-                return true;
+                return service;
             }
 
-            return false;
-        }
-
-        private static void TryToCreateNonBehaviourInstance(Binding binding)
-        {
-            Type serviceType = binding.ServiceType;
             foreach (ConstructorInfo constructorInfo in GetConstructors(serviceType))
             {
-                object[] parameters = GetParameters(constructorInfo, null);
-                binding.FromInstance(Activator.CreateInstance(serviceType, parameters));
-                break;
+                object[] parameters = GetParameters(constructorInfo, serviceType, null);
+                object service = Activator.CreateInstance(serviceType, parameters);
+
+                if (binding.InstanceType == InstanceType.Cached)
+                    binding.FromInstance(service);
+
+                return service;
             }
+
+            return null;
         }
 
-        private static object[] GetParameters(MethodBase methodBase, object targetObject)
+        private static object[] GetParameters(MethodBase methodBase, Type typeObject, object targetObject)
         {
             List<object> parameters = new List<object>();
 
@@ -90,14 +86,24 @@ namespace Duckject.Core.Utils
 
             foreach (Type parameterType in parameterTypes)
             {
-                Binding bind = bindings.Where(binding => binding.InterfaceCheck(parameterType))
+                Binding bind = bindings.Where(binding => binding.TypesCheck(parameterType))
+                    .Where(binding => binding.InterfaceCheck(parameterType))
                     .Where(binding => binding.AbstractClassCheck(parameterType))
-                    .Where(binding => binding.IsEqualsIdentifier(attribute?.Identifier))
-                    .Where(binding => binding.IsTargetedTo(parameterType))
-                    .FirstOrDefault(binding => binding.IsTargetedTo(targetObject));
+                    .Where(binding => binding.IsTargetedTo(typeObject))
+                    .Where(binding => binding.IsTargetedTo(targetObject))
+                    .FirstOrDefault(binding => binding.IsEqualsIdentifier(attribute?.Identifier));
 
                 if (bind != null)
+                {
+                    if (bind.Service == null)
+                    {
+                        object service = TryToCreateInstance(bind);
+                        parameters.Add(service);
+                        continue;
+                    }
+
                     parameters.Add(bind.Service);
+                }
             }
 
             return parameters.ToArray();
@@ -118,7 +124,10 @@ namespace Duckject.Core.Utils
         private static bool AbstractClassCheck(this Binding binding, Type type) =>
             !(type.IsClass && type.IsAbstract) || binding.ServiceType.GetBaseTypes().Any(item => item == type);
 
-        private static IEnumerable<MethodInfo> GetMethods(object targetObject) 
+        private static bool TypesCheck(this Binding binding, Type type) =>
+            binding.ServiceType.GetBaseTypes().Any(item => item == type);
+
+        private static IEnumerable<MethodInfo> GetMethods(object targetObject)
         {
             return targetObject.GetType()
                 .GetBaseTypes()
